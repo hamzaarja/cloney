@@ -1,0 +1,22 @@
+[build-system]
+requires = [
+    "setuptools>=40.8.0",
+    "wheel>=0.36.0",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cloney"
+version = "0.1.0"
+description = "A CLI tool for migrating files between cloud storage services"
+readme = "README.md"
+requires-python = ">=3.7"
+dependencies = [
+    "boto3",
+    "google-cloud-storage",
+    "oss2",
+    "azure-storage-blob"
+]
+
+[project.scripts]
+cloney = "cloney.main:main"
