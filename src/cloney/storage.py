@@ -4,7 +4,11 @@ from google.cloud import storage as gcs_storage
 import oss2
 from azure.storage.blob import BlobServiceClient
 import concurrent.futures
+from cloney.logger import logging
+from cloney.utils import time_logger
 
+
+@time_logger
 def download_from_source(source_service, source_bucket, local_dir):
     if source_service == "s3":
         download_s3_bucket(source_bucket, local_dir)
@@ -17,6 +21,7 @@ def download_from_source(source_service, source_bucket, local_dir):
     else:
         raise ValueError(f"Unsupported source service: {source_service}")
 
+@time_logger
 def upload_to_destination(destination_service, destination_bucket, local_dir):
     if destination_service == "s3":
         upload_to_s3_bucket(destination_bucket, local_dir)
@@ -30,7 +35,6 @@ def upload_to_destination(destination_service, destination_bucket, local_dir):
         raise ValueError(f"Unsupported destination service: {destination_service}")
 
 # --- Download Functions ---
-
 def download_s3_file(bucket_name, object_key, local_dir, worker_id):
     s3 = boto3.client("s3")
     local_path = os.path.join(local_dir, object_key)
@@ -38,7 +42,7 @@ def download_s3_file(bucket_name, object_key, local_dir, worker_id):
     try:
         s3.download_file(bucket_name, object_key, local_path)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to download {object_key} from S3 - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to download {object_key} from S3 - {e}")
 
 def download_s3_bucket(bucket_name, local_dir):
     s3 = boto3.client("s3")
@@ -65,9 +69,9 @@ def download_gcs_file(bucket_name, blob_name, local_dir, worker_id):
     
     try:
         blob.download_to_filename(local_path)
-        print(f"Worker {worker_id}: Successfully downloaded {blob_name}")
+        logging.info(f"Worker {worker_id}: Successfully downloaded {blob_name}")
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to download {blob_name} from GCS - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from GCS - {e}")
 
 def download_gcs_bucket(bucket_name, local_dir):
     client = gcs_storage.Client()
@@ -99,7 +103,7 @@ def download_oss_file(bucket_name, object_key, local_dir, worker_id):
     try:
         bucket.get_object_to_file(object_key, local_path)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to download {object_key} from OSS - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to download {object_key} from OSS - {e}")
 
 def download_oss_bucket(bucket_name, local_dir):
     access_key_id = os.getenv("OSS_ACCESS_KEY_ID")
@@ -132,7 +136,7 @@ def download_azure_file(container_name, blob_name, local_dir, worker_id):
         with open(local_path, "wb") as file:
             file.write(blob_client.download_blob().readall())
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to download {blob_name} from Azure - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from Azure - {e}")
 
 def download_azure_bucket(container_name, local_dir):
     connection_string = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
@@ -155,7 +159,7 @@ def upload_s3_file(bucket_name, local_path, local_dir, worker_id):
     try:
         s3.upload_file(local_path, bucket_name, object_key)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to upload {local_path} to S3 - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to S3 - {e}")
 
 def upload_to_s3_bucket(bucket_name, local_dir):
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -176,7 +180,7 @@ def upload_gcs_file(bucket_name, local_path, local_dir, worker_id):
     try:
         blob.upload_from_filename(local_path)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to upload {local_path} to GCS - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to GCS - {e}")
 
 def upload_to_gcs_bucket(bucket_name, local_dir):
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -205,7 +209,7 @@ def upload_oss_file(bucket_name, local_path, local_dir, worker_id):
     try:
         bucket.put_object_from_file(object_key, local_path)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to upload {local_path} to OSS - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to OSS - {e}")
 
 def upload_to_oss_bucket(bucket_name, local_dir):
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -231,7 +235,7 @@ def upload_azure_file(container_name, local_path, local_dir, worker_id):
         with open(local_path, "rb") as data:
             blob_client.upload_blob(data, overwrite=True)
     except Exception as e:
-        print(f"Worker {worker_id}: Failed to upload {local_path} to Azure - {e}")
+        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to Azure - {e}")
 
 def upload_to_azure_bucket(container_name, local_dir):
     with concurrent.futures.ThreadPoolExecutor() as executor:
