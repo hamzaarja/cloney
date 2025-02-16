@@ -4,6 +4,7 @@ from google.cloud import storage as gcs_storage
 import oss2
 from azure.storage.blob import BlobServiceClient
 import concurrent.futures
+import posixpath
 
 def download_from_source(source_service, source_bucket, local_dir):
     if source_service == "s3":
@@ -37,6 +38,7 @@ def download_s3_file(bucket_name, object_key, local_dir, worker_id):
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     try:
         s3.download_file(bucket_name, object_key, local_path)
+        print(f"Worker {worker_id}: downloaded {object_key} from S3.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to download {object_key} from S3 - {e}")
 
@@ -94,10 +96,12 @@ def download_oss_file(bucket_name, object_key, local_dir, worker_id):
     auth = oss2.Auth(access_key_id, access_key_secret)
     bucket = oss2.Bucket(auth, oss_endpoint, bucket_name)
 
-    local_path = os.path.join(local_dir, object_key)
+    local_path = os.path.join(local_dir, *object_key.split("/"))
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
+
     try:
         bucket.get_object_to_file(object_key, local_path)
+        print(f"Worker {worker_id}: Downloaded {object_key} -> {local_path}")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to download {object_key} from OSS - {e}")
 
@@ -106,17 +110,30 @@ def download_oss_bucket(bucket_name, local_dir):
     access_key_secret = os.getenv("OSS_ACCESS_KEY_SECRET")
     oss_endpoint = os.getenv("OSS_ENDPOINT")
 
+    if not access_key_id or not access_key_secret or not oss_endpoint:
+        raise ValueError("ERROR: OSS_ACCESS_KEY_ID, OSS_ACCESS_KEY_SECRET, and OSS_ENDPOINT must be set as environment variables.")
+
     auth = oss2.Auth(access_key_id, access_key_secret)
     bucket = oss2.Bucket(auth, oss_endpoint, bucket_name)
 
-    objects = bucket.list_objects()
+    marker = "" 
     with concurrent.futures.ThreadPoolExecutor() as executor:
         futures = []
-        for obj in objects.object_list:
-            worker_id = len(futures)  # Assigning worker ID
-            futures.append(executor.submit(download_oss_file, bucket_name, obj.key, local_dir, worker_id))
-        concurrent.futures.wait(futures)
+        while True:
+            result = bucket.list_objects(marker=marker, max_keys=1000)
 
+            for obj in result.object_list:
+                if obj.key.endswith("/"):
+                    continue
+
+                worker_id = len(futures)
+                futures.append(executor.submit(download_oss_file, bucket_name, obj.key, local_dir, worker_id))
+
+            if not result.is_truncated:
+                break
+            marker = result.next_marker 
+
+        concurrent.futures.wait(futures)
 # --- Azure Blob Storage Functions ---
 
 def download_azure_file(container_name, blob_name, local_dir, worker_id):
@@ -131,6 +148,7 @@ def download_azure_file(container_name, blob_name, local_dir, worker_id):
         blob_client = container_client.get_blob_client(blob_name)
         with open(local_path, "wb") as file:
             file.write(blob_client.download_blob().readall())
+        print(f"Worker {worker_id}: downloaded {blob_name}.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to download {blob_name} from Azure - {e}")
 
@@ -151,9 +169,10 @@ def download_azure_bucket(container_name, local_dir):
 
 def upload_s3_file(bucket_name, local_path, local_dir, worker_id):
     s3 = boto3.client("s3")
-    object_key = os.path.relpath(local_path, local_dir)
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))  # Normalize path
     try:
         s3.upload_file(local_path, bucket_name, object_key)
+        print(f"Worker {worker_id}: Uploaded {local_path} to S3 as {object_key}.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to upload {local_path} to S3 - {e}")
 
@@ -172,9 +191,15 @@ def upload_to_s3_bucket(bucket_name, local_dir):
 def upload_gcs_file(bucket_name, local_path, local_dir, worker_id):
     client = gcs_storage.Client()
     bucket = client.get_bucket(bucket_name)
-    blob = bucket.blob(os.path.relpath(local_path, local_dir))
+    
+    # Normalize object key for GCS (always use forward slashes)
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
+
+    blob = bucket.blob(object_key)
+    
     try:
         blob.upload_from_filename(local_path)
+        print(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to upload {local_path} to GCS - {e}")
 
@@ -200,10 +225,13 @@ def upload_oss_file(bucket_name, local_path, local_dir, worker_id):
 
     auth = oss2.Auth(access_key_id, access_key_secret)
     bucket = oss2.Bucket(auth, oss_endpoint, bucket_name)
-    object_key = os.path.relpath(local_path, local_dir)
+
+    # Normalize object key for OSS (always use forward slashes)
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
 
     try:
         bucket.put_object_from_file(object_key, local_path)
+        print(f"Worker {worker_id}: Uploaded {local_path} to OSS as {object_key}.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to upload {local_path} to OSS - {e}")
 
@@ -230,6 +258,7 @@ def upload_azure_file(container_name, local_path, local_dir, worker_id):
     try:
         with open(local_path, "rb") as data:
             blob_client.upload_blob(data, overwrite=True)
+        print(f"Worker {worker_id}: uploaded {local_path} to Azure.")
     except Exception as e:
         print(f"Worker {worker_id}: Failed to upload {local_path} to Azure - {e}")
 
