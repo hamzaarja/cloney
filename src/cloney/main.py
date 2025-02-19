@@ -3,6 +3,7 @@ import argparse
 from cloney.storage import download_from_source, upload_to_destination
 from cloney.utils import create_temp_directory, cleanup_temp_directory
 from cloney.check_buckets import check_source_bucket, check_destination_bucket
+from cloney.logger import logging
 
 def main():
     parser = argparse.ArgumentParser(description="Cloney - Cloud Storage Migration Tool")
@@ -20,26 +21,26 @@ def main():
 
     try:
         if not check_source_bucket(args.source_service, args.source_bucket):
-            print(f"Source bucket {args.source_bucket} does not exist. Exiting.")
+            logging.error(f"Source bucket {args.source_bucket} does not exist. Exiting.")
             return
 
         if not check_destination_bucket(args.destination_service, args.destination_bucket, create_if_missing=args.create_destination_bucket):
-            print(f"Destination bucket {args.destination_bucket} does not exist or could not be created. Exiting.")
+            logging.error(f"Destination bucket {args.destination_bucket} does not exist or could not be created. Exiting.")
             return           
-        print(f"Downloading files from {args.source_service}://{args.source_bucket} to local directory...")
+        logging.info(f"Downloading files from {args.source_service}://{args.source_bucket} to local directory...")
         download_from_source(args.source_service, args.source_bucket, temp_dir)
 
-        print(f"Uploading files from local directory to {args.destination_service}://{args.destination_bucket}...")
+        logging.info(f"Uploading files from local directory to {args.destination_service}://{args.destination_bucket}...")
         upload_to_destination(args.destination_service, args.destination_bucket, temp_dir)
 
-        print(f"Migration from {args.source_service}://{args.source_bucket} to {args.destination_service}://{args.destination_bucket} completed successfully!")
+        logging.info(f"Migration from {args.source_service}://{args.source_bucket} to {args.destination_service}://{args.destination_bucket} completed successfully!")
 
     except Exception as e:
-        print(f"Error: {e}")
+        logging.error(f"Error: {e}")
         sys.exit(1)
 
     finally:
-        print(f"Cleaning up temporary directory: {temp_dir}")
+        logging.info(f"Cleaning up temporary directory: {temp_dir}")
         cleanup_temp_directory(temp_dir)
 
 if __name__ == "__main__":
