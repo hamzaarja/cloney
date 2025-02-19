@@ -42,7 +42,7 @@ def download_s3_file(bucket_name, object_key, local_dir, worker_id):
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     try:
         s3.download_file(bucket_name, object_key, local_path)
-        print(f"Worker {worker_id}: downloaded {object_key} from S3.")
+        logging.info(f"Worker {worker_id}: downloaded {object_key} from S3.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to download {object_key} from S3 - {e}")
 
@@ -105,7 +105,7 @@ def download_oss_file(bucket_name, object_key, local_dir, worker_id):
 
     try:
         bucket.get_object_to_file(object_key, local_path)
-        print(f"Worker {worker_id}: Downloaded {object_key} -> {local_path}")
+        logging.info(f"Worker {worker_id}: Downloaded {object_key} -> {local_path}")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to download {object_key} from OSS - {e}")
 
@@ -152,7 +152,7 @@ def download_azure_file(container_name, blob_name, local_dir, worker_id):
         blob_client = container_client.get_blob_client(blob_name)
         with open(local_path, "wb") as file:
             file.write(blob_client.download_blob().readall())
-        print(f"Worker {worker_id}: downloaded {blob_name}.")
+        logging.info(f"Worker {worker_id}: downloaded {blob_name}.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from Azure - {e}")
 
@@ -176,7 +176,7 @@ def upload_s3_file(bucket_name, local_path, local_dir, worker_id):
     object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))  # Normalize path
     try:
         s3.upload_file(local_path, bucket_name, object_key)
-        print(f"Worker {worker_id}: Uploaded {local_path} to S3 as {object_key}.")
+        logging.info(f"Worker {worker_id}: Uploaded {local_path} to S3 as {object_key}.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to S3 - {e}")
 
@@ -203,7 +203,7 @@ def upload_gcs_file(bucket_name, local_path, local_dir, worker_id):
     
     try:
         blob.upload_from_filename(local_path)
-        print(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
+        logging.info(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to GCS - {e}")
 
@@ -235,7 +235,7 @@ def upload_oss_file(bucket_name, local_path, local_dir, worker_id):
 
     try:
         bucket.put_object_from_file(object_key, local_path)
-        print(f"Worker {worker_id}: Uploaded {local_path} to OSS as {object_key}.")
+        logging.info(f"Worker {worker_id}: Uploaded {local_path} to OSS as {object_key}.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to OSS - {e}")
 
@@ -262,7 +262,7 @@ def upload_azure_file(container_name, local_path, local_dir, worker_id):
     try:
         with open(local_path, "rb") as data:
             blob_client.upload_blob(data, overwrite=True)
-        print(f"Worker {worker_id}: uploaded {local_path} to Azure.")
+        logging.info(f"Worker {worker_id}: uploaded {local_path} to Azure.")
     except Exception as e:
         logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to Azure - {e}")
 
