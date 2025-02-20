@@ -80,6 +80,13 @@ If you would like to create the destination bucket automatically, use the `--cre
 cloney s3 my-source-bucket gcs my-destination-bucket --create-destination-bucket
 ```
 
+If you want to verify the files between the source and destination buckets, use the --verify flag:
+
+```sh
+cloney s3 my-source-bucket gcs my-destination-bucket --verify
+```
+This will check for any mismatched or missing files between the two buckets.
+
 ## Authentication
 
 Cloney supports authentication via environment variables or configuration files:
