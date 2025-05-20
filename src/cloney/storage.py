@@ -7,12 +7,46 @@ import concurrent.futures
 from cloney.logger import logging
 from cloney.utils import time_logger
 import posixpath
+import logging as python_logging
 
+
+python_logging.getLogger('s3transfer').setLevel(python_logging.WARNING)
+python_logging.getLogger('botocore.utils').setLevel(python_logging.WARNING)
+python_logging.getLogger('botocore.checksums').setLevel(python_logging.WARNING)
+
+_spaces_client = None
+
+def get_spaces_client():
+    global _spaces_client
+    
+    if _spaces_client is not None:
+        return _spaces_client
+
+    access_key = os.getenv("SPACES_ACCESS_KEY")
+    secret_key = os.getenv("SPACES_SECRET_KEY")
+    region = os.getenv("SPACES_REGION", "nyc3")  # Default to NYC3 region
+
+    if not access_key or not secret_key:
+        raise ValueError("ERROR: SPACES_ACCESS_KEY and SPACES_SECRET_KEY must be set as environment variables.")
+
+    if not os.getenv("SPACES_REGION"):
+        logging.warning("SPACES_REGION environment variable is not set, defaulting to 'nyc3'")
+
+    session = boto3.session.Session()
+    _spaces_client = session.client('s3',
+        region_name=region,
+        endpoint_url=f"https://{region}.digitaloceanspaces.com",
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key
+    )
+    return _spaces_client
 
 @time_logger
 def download_from_source(source_service, source_bucket, local_dir):
     if source_service == "s3":
         download_s3_bucket(source_bucket, local_dir)
+    elif source_service == "spaces":
+        download_spaces_bucket(source_bucket, local_dir)
     elif source_service == "gcs":
         download_gcs_bucket(source_bucket, local_dir)
     elif source_service == "oss":
@@ -26,6 +60,8 @@ def download_from_source(source_service, source_bucket, local_dir):
 def upload_to_destination(destination_service, destination_bucket, local_dir):
     if destination_service == "s3":
         upload_to_s3_bucket(destination_bucket, local_dir)
+    elif destination_service == "spaces":
+        upload_to_spaces_bucket(destination_bucket, local_dir)
     elif destination_service == "gcs":
         upload_to_gcs_bucket(destination_bucket, local_dir)
     elif destination_service == "oss":
@@ -138,6 +174,7 @@ def download_oss_bucket(bucket_name, local_dir):
             marker = result.next_marker 
 
         concurrent.futures.wait(futures)
+
 # --- Azure Blob Storage Functions ---
 
 def download_azure_file(container_name, blob_name, local_dir, worker_id):
@@ -167,6 +204,29 @@ def download_azure_bucket(container_name, local_dir):
         for blob in blobs:
             worker_id = len(futures)  # Assigning worker ID
             futures.append(executor.submit(download_azure_file, container_name, blob.name, local_dir, worker_id))
+        concurrent.futures.wait(futures)
+
+# --- Digital Ocean Spaces Functions ---
+
+def download_spaces_file(bucket_name, object_key, local_dir, worker_id):
+    spaces = get_spaces_client()
+    local_path = os.path.join(local_dir, object_key)
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    try:
+        spaces.download_file(bucket_name, object_key, local_path)
+        logging.info(f"Worker {worker_id}: downloaded {object_key} from Spaces.")
+    except Exception as e:
+        logging.warning(f"Worker {worker_id}: Failed to download {object_key} from Spaces - {e}")
+
+def download_spaces_bucket(bucket_name, local_dir):
+    spaces = get_spaces_client()
+    response = spaces.list_objects_v2(Bucket=bucket_name)
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for obj in response.get("Contents", []):
+            object_key = obj["Key"]
+            worker_id = len(futures)
+            futures.append(executor.submit(download_spaces_file, bucket_name, object_key, local_dir, worker_id))
         concurrent.futures.wait(futures)
 
 # --- Upload Functions ---
@@ -274,4 +334,26 @@ def upload_to_azure_bucket(container_name, local_dir):
                 local_path = os.path.join(root, file)
                 worker_id = len(futures)  # Assigning worker ID
                 futures.append(executor.submit(upload_azure_file, container_name, local_path, local_dir, worker_id))
+        concurrent.futures.wait(futures)
+
+
+# --- Digital Ocean Spaces Functions ---
+
+def upload_spaces_file(bucket_name, local_path, local_dir, worker_id):
+    spaces = get_spaces_client()
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
+    try:
+        spaces.upload_file(local_path, bucket_name, object_key)
+        logging.info(f"Worker {worker_id}: Uploaded {local_path} to Spaces as {object_key}.")
+    except Exception as e:
+        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to Spaces - {e}")
+
+def upload_to_spaces_bucket(bucket_name, local_dir):
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        for root, _, files in os.walk(local_dir):
+            for file in files:
+                local_path = os.path.join(root, file)
+                worker_id = len(futures)
+                futures.append(executor.submit(upload_spaces_file, bucket_name, local_path, local_dir, worker_id))
         concurrent.futures.wait(futures)

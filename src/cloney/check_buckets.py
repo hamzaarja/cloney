@@ -4,6 +4,7 @@ from azure.storage.blob import BlobServiceClient
 import oss2
 import os
 from cloney.logger import logging
+from cloney.storage import get_spaces_client
 
 
 def check_source_bucket(source_service, source_bucket):
@@ -14,6 +15,14 @@ def check_source_bucket(source_service, source_bucket):
             return True
         except Exception as e:
             logging.warning(f"S3 Bucket {source_bucket} not found: {e}")
+            return False
+    elif source_service == "spaces":
+        try:
+            spaces_client = get_spaces_client()
+            spaces_client.head_bucket(Bucket=source_bucket)
+            return True
+        except Exception as e:
+            logging.warning(f"Spaces Bucket {source_bucket} not found: {e}")
             return False
     elif source_service == "gcs":
         client = storage.Client()
@@ -74,6 +83,23 @@ def check_destination_bucket(destination_service, destination_bucket, create_if_
                 return True
             else:
                 logging.warning(f"S3 Bucket {destination_bucket} not found, pass --create-destination-bucket to create distination bucket.")
+                return False
+    elif destination_service == "spaces":
+        spaces_client = get_spaces_client()
+        try:
+            spaces_client.head_bucket(Bucket=destination_bucket)
+            return True
+        except Exception:
+            if create_if_missing:
+                region = os.getenv("SPACES_REGION", "nyc3")
+                spaces_client.create_bucket(
+                    Bucket=destination_bucket,
+                    CreateBucketConfiguration={'LocationConstraint': region}
+                )
+                logging.info(f"Created Spaces Bucket {destination_bucket}")
+                return True
+            else:
+                logging.warning(f"Spaces Bucket {destination_bucket} not found, pass --create-destination-bucket to create destination bucket.")
                 return False
     elif destination_service == "gcs":
         client = storage.Client()
