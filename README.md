@@ -1,10 +1,10 @@
 # Cloney - Storage Migration CLI
 
-Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, Google Cloud Storage (GCS), Alibaba Cloud OSS, and Azure Blob Storage, allowing you to move data efficiently.
+Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, Google Cloud Storage (GCS), Alibaba Cloud OSS, DigitalOcean Spaces, and Azure Blob Storage, allowing you to move data efficiently.
 
 ## Features
 
-🔄 Migrate files between S3, GCS, OSS, and Azure Blob
+🔄 Migrate files between S3, GCS, OSS, Spaces and Azure Blob
 
 ⚡ Fast and efficient transfer with minimal configuration
 
@@ -50,6 +50,12 @@ cloney azure my-source-container azure my-destination-container
 
 ```sh
 cloney oss my-source-bucket oss my-destination-bucket
+```
+
+**AWS S3 to DigitalOcean Spaces**
+
+```sh
+cloney s3 my-source-bucket spaces my-destination-bucket
 ```
 
 ### Cross-Cloud Transfers
@@ -119,6 +125,13 @@ export OSS_ACCESS_KEY_SECRET=your-secret-key
 ```sh
 export AZURE_STORAGE_CONNECTION_STRING="your-connection-string"
 ```
+**DigitalOcean Spaces**
+
+```sh
+export SPACES_ACCESS_KEY=your-access-key
+export SPACES_SECRET_KEY=your-secret-key
+export SPACES_REGION=your-region
+```
 
 ### Windows (PowerShell)
 
@@ -147,6 +160,14 @@ $env:OSS_ACCESS_KEY_SECRET="your-secret-key"
 
 ```sh
 $env:AZURE_STORAGE_CONNECTION_STRING="your-connection-string"
+```
+
+**DigitalOcean Spaces**
+
+```sh
+$env:SPACES_ACCESS_KEY="your-access-key"
+$env:SPACES_SECRET_KEY="your-secret-key"
+$env:SPACES_REGION="your-region"
 ```
 
 ## Contributing
