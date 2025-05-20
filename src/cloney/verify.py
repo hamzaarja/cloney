@@ -5,6 +5,8 @@ from azure.storage.blob import BlobServiceClient
 import oss2
 from cloney.logger import logging
 from cloney.utils import time_logger
+from cloney.storage import get_spaces_client
+
 def get_s3_objects(bucket_name):
     s3 = boto3.client("s3")
     objects = []
@@ -19,6 +21,25 @@ def get_s3_objects(bucket_name):
                 })
 
     return objects
+
+def get_spaces_objects(bucket_name):
+    try:
+        spaces = get_spaces_client()
+        objects = []
+
+        paginator = spaces.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    objects.append({
+                        "Key": obj["Key"],
+                        "Size": obj["Size"]
+                    })
+
+        return objects
+    except Exception as e:
+        logging.warning(f"Spaces Error: {e}")
+        return []
 
 def get_gcs_objects(bucket_name):
     try:
@@ -57,7 +78,7 @@ def get_azure_objects(bucket_name):
         
         return objects
     except Exception as e:
-        logging.warning("fAzure Error: {e}")
+        logging.warning(f"Azure Error: {e}")
         return []
 
 def get_oss_objects(bucket_name):
@@ -91,6 +112,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
     destination_objects = []
     if source_service == "s3":
         source_objects = get_s3_objects(source_bucket)
+    elif source_service == "spaces":
+        source_objects = get_spaces_objects(source_bucket)
     elif source_service == "gcs":
         source_objects = get_gcs_objects(source_bucket)
     elif source_service == "oss":
@@ -102,6 +125,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
     
     if destination_service == "s3":
         destination_objects = get_s3_objects(destination_bucket)
+    elif destination_service == "spaces":
+        destination_objects = get_spaces_objects(destination_bucket)
     elif destination_service == "gcs":
         destination_objects = get_gcs_objects(destination_bucket)
     elif destination_service == "oss":

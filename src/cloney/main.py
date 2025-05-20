@@ -8,9 +8,9 @@ from cloney.verify import compare_object_lists
 
 def main():
     parser = argparse.ArgumentParser(description="Cloney - Cloud Storage Migration Tool")
-    parser.add_argument("source_service", help="Source storage service (s3, gcs, oss, azure)")
+    parser.add_argument("source_service", help="Source storage service (s3, spaces, gcs, oss, azure)")
     parser.add_argument("source_bucket", help="Source bucket name")
-    parser.add_argument("destination_service", help="Destination storage service (s3, gcs, oss, azure)")
+    parser.add_argument("destination_service", help="Destination storage service (s3, spaces, gcs, oss, azure)")
     parser.add_argument("destination_bucket", help="Destination bucket name")
     
     parser.add_argument('--create-destination-bucket', action='store_true', help="Create the destination bucket if it doesn't exist")
