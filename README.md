@@ -52,11 +52,6 @@ cloney azure my-source-container azure my-destination-container
 cloney oss my-source-bucket oss my-destination-bucket
 ```
 
-**AWS S3 to DigitalOcean Spaces**
-
-```sh
-cloney s3 my-source-bucket spaces my-destination-bucket
-```
 
 ### Cross-Cloud Transfers
 
@@ -79,6 +74,13 @@ cloney gcs my-gcs-bucket azure my-azure-container
 ```sh
 cloney azure my-azure-container oss my-oss-bucket
 ```
+
+**AWS S3 to DigitalOcean Spaces**
+
+```sh
+cloney s3 my-source-bucket spaces my-destination-bucket
+```
+
 
 If you would like to create the destination bucket automatically, use the `--create-destination-bucket` flag:
 
