@@ -8,6 +8,7 @@ from cloney.logger import logging
 from cloney.utils import time_logger
 import posixpath
 import logging as python_logging
+import time
 
 
 python_logging.getLogger('s3transfer').setLevel(python_logging.WARNING)
@@ -72,26 +73,36 @@ def upload_to_destination(destination_service, destination_bucket, local_dir):
         raise ValueError(f"Unsupported destination service: {destination_service}")
 
 # --- Download Functions ---
-def download_s3_file(bucket_name, object_key, local_dir, worker_id):
-    s3 = boto3.client("s3")
+def download_s3_file(s3_client, bucket_name, object_key, local_dir, worker_id, max_retries=3):
     local_path = os.path.join(local_dir, object_key)
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
-    try:
-        s3.download_file(bucket_name, object_key, local_path)
-        logging.info(f"Worker {worker_id}: downloaded {object_key} from S3.")
-    except Exception as e:
-        logging.warning(f"Worker {worker_id}: Failed to download {object_key} from S3 - {e}")
+    
+    for attempt in range(max_retries):
+        try:
+            s3_client.download_file(bucket_name, object_key, local_path)
+            logging.info(f"Worker {worker_id}: downloaded {object_key} from S3.")
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to download {object_key} from S3 after {max_retries} attempts - {e}")
+            else:
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {object_key} - {e}")
+                time.sleep(2 ** attempt)
 
-def download_s3_bucket(bucket_name, local_dir):
+def download_s3_bucket(bucket_name, local_dir, max_workers=50):
     s3 = boto3.client("s3")
-    response = s3.list_objects_v2(Bucket=bucket_name)
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = []
-        for obj in response.get("Contents", []):
-            object_key = obj["Key"]
-            worker_id = len(futures)  # Assigning worker ID
-            futures.append(executor.submit(download_s3_file, bucket_name, object_key, local_dir, worker_id))
-        concurrent.futures.wait(futures)
+    paginator = s3.get_paginator("list_objects_v2")
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        worker_id = 0
+        for page in paginator.paginate(Bucket=bucket_name):
+            futures = []
+            for obj in page.get("Contents", []):
+                object_key = obj["Key"]
+                s3_client = boto3.client("s3")
+                futures.append(executor.submit(download_s3_file, s3_client, bucket_name, object_key, local_dir, worker_id))
+                worker_id += 1
+            concurrent.futures.wait(futures)
 
 # --- Google Cloud Storage Functions ---
 
@@ -231,23 +242,31 @@ def download_spaces_bucket(bucket_name, local_dir):
 
 # --- Upload Functions ---
 
-def upload_s3_file(bucket_name, local_path, local_dir, worker_id):
-    s3 = boto3.client("s3")
-    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))  # Normalize path
-    try:
-        s3.upload_file(local_path, bucket_name, object_key)
-        logging.info(f"Worker {worker_id}: Uploaded {local_path} to S3 as {object_key}.")
-    except Exception as e:
-        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to S3 - {e}")
+def upload_s3_file(s3_client, bucket_name, local_path, local_dir, worker_id, max_retries=3):
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
+    
+    for attempt in range(max_retries):
+        try:
+            s3_client.upload_file(local_path, bucket_name, object_key)
+            logging.info(f"Worker {worker_id}: Uploaded {local_path} to S3 as {object_key}.")
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to S3 after {max_retries} attempts - {e}")
+            else:
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {local_path} - {e}")
+                time.sleep(2 ** attempt)
 
-def upload_to_s3_bucket(bucket_name, local_dir):
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+def upload_to_s3_bucket(bucket_name, local_dir, max_workers=50):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
+        worker_id = 0
         for root, _, files in os.walk(local_dir):
             for file in files:
                 local_path = os.path.join(root, file)
-                worker_id = len(futures)  # Assigning worker ID
-                futures.append(executor.submit(upload_s3_file, bucket_name, local_path, local_dir, worker_id))
+                s3_client = boto3.client("s3")
+                futures.append(executor.submit(upload_s3_file, s3_client, bucket_name, local_path, local_dir, worker_id))
+                worker_id += 1
         concurrent.futures.wait(futures)
 
 # --- Google Cloud Storage Functions ---
