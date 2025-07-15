@@ -106,9 +106,8 @@ def download_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def download_gcs_file(bucket_name, blob_name, local_dir, worker_id):
-    client = gcs_storage.Client()
-    bucket = client.get_bucket(bucket_name)
+def download_gcs_file(gcs_client, bucket_name, blob_name, local_dir, worker_id, max_retries=3):
+    bucket = gcs_client.get_bucket(bucket_name)
     blob = bucket.blob(blob_name)
     
     # Ensure forward slashes are used in GCS blob names
@@ -116,22 +115,29 @@ def download_gcs_file(bucket_name, blob_name, local_dir, worker_id):
     
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     
-    try:
-        blob.download_to_filename(local_path)
-        logging.info(f"Worker {worker_id}: Successfully downloaded {blob_name}")
-    except Exception as e:
-        logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from GCS - {e}")
+    for attempt in range(max_retries):
+        try:
+            blob.download_to_filename(local_path)
+            logging.info(f"Worker {worker_id}: Successfully downloaded {blob_name}")
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from GCS after {max_retries} attempts - {e}")
+            else:
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {blob_name} - {e}")
+                time.sleep(2 ** attempt)
 
-def download_gcs_bucket(bucket_name, local_dir):
+def download_gcs_bucket(bucket_name, local_dir, max_workers=50):
     client = gcs_storage.Client()
     bucket = client.get_bucket(bucket_name)
-    blobs = bucket.list_blobs()
     
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        worker_id = 0
         futures = []
-        for blob in blobs:
-            worker_id = len(futures)  # Assigning worker ID
-            futures.append(executor.submit(download_gcs_file, bucket_name, blob.name, local_dir, worker_id))
+        for blob in bucket.list_blobs():
+            gcs_client = gcs_storage.Client()
+            futures.append(executor.submit(download_gcs_file, gcs_client, bucket_name, blob.name, local_dir, worker_id))
+            worker_id += 1
         concurrent.futures.wait(futures)
 
 # --- Alibaba Cloud OSS Functions ---
@@ -271,29 +277,36 @@ def upload_to_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def upload_gcs_file(bucket_name, local_path, local_dir, worker_id):
-    client = gcs_storage.Client()
-    bucket = client.get_bucket(bucket_name)
+def upload_gcs_file(gcs_client, bucket_name, local_path, local_dir, worker_id, max_retries=3):
+    bucket = gcs_client.get_bucket(bucket_name)
     
     # Normalize object key for GCS (always use forward slashes)
     object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
 
     blob = bucket.blob(object_key)
     
-    try:
-        blob.upload_from_filename(local_path)
-        logging.info(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
-    except Exception as e:
-        logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to GCS - {e}")
+    for attempt in range(max_retries):
+        try:
+            blob.upload_from_filename(local_path)
+            logging.info(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
+            return
+        except Exception as e:
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to GCS after {max_retries} attempts - {e}")
+            else:
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {local_path} - {e}")
+                time.sleep(2 ** attempt)
 
-def upload_to_gcs_bucket(bucket_name, local_dir):
-    with concurrent.futures.ThreadPoolExecutor() as executor:
+def upload_to_gcs_bucket(bucket_name, local_dir, max_workers=50):
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
+        worker_id = 0
         for root, _, files in os.walk(local_dir):
             for file in files:
                 local_path = os.path.join(root, file)
-                worker_id = len(futures)  # Assigning worker ID
-                futures.append(executor.submit(upload_gcs_file, bucket_name, local_path, local_dir, worker_id))
+                gcs_client = gcs_storage.Client()
+                futures.append(executor.submit(upload_gcs_file, gcs_client, bucket_name, local_path, local_dir, worker_id))
+                worker_id += 1
         concurrent.futures.wait(futures)
 
 # --- Alibaba Cloud OSS Functions ---
