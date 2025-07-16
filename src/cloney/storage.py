@@ -9,6 +9,9 @@ from cloney.utils import time_logger
 import posixpath
 import logging as python_logging
 import time
+import threading
+import queue
+import random
 
 
 python_logging.getLogger('s3transfer').setLevel(python_logging.WARNING)
@@ -16,7 +19,8 @@ python_logging.getLogger('botocore.utils').setLevel(python_logging.WARNING)
 python_logging.getLogger('botocore.checksums').setLevel(python_logging.WARNING)
 
 _spaces_client = None
-_gcs_client = None
+_gcs_client_pool = None
+_gcs_pool_lock = threading.Lock()
 
 def get_spaces_client():
     global _spaces_client
@@ -107,40 +111,73 @@ def download_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def get_gcs_client():
-    global _gcs_client
+def get_gcs_client_pool(pool_size=10):
+    global _gcs_client_pool, _gcs_pool_lock
     
-    if _gcs_client is not None:
-        return _gcs_client
+    if _gcs_client_pool is not None:
+        return _gcs_client_pool
     
-    _gcs_client = gcs_storage.Client()
-    return _gcs_client
+    with _gcs_pool_lock:
+        if _gcs_client_pool is None:
+            _gcs_client_pool = queue.Queue()
+            for _ in range(pool_size):
+                _gcs_client_pool.put(gcs_storage.Client())
+    
+    return _gcs_client_pool
 
-def download_gcs_file(bucket_name, blob_name, local_dir, worker_id, max_retries=3):
-    gcs_client = get_gcs_client()
-    bucket = gcs_client.get_bucket(bucket_name)
-    blob = bucket.blob(blob_name)
+def get_gcs_client():
+    pool = get_gcs_client_pool()
+    return pool.get()
+
+def return_gcs_client(client):
+    pool = get_gcs_client_pool()
+    pool.put(client)
+
+def download_gcs_file(bucket_name, blob_name, local_dir, worker_id, max_retries=5):
+    gcs_client = None
     
-    # Ensure forward slashes are used in GCS blob names
     local_path = os.path.join(local_dir, blob_name.replace('/', os.sep))
-    
     os.makedirs(os.path.dirname(local_path), exist_ok=True)
     
     for attempt in range(max_retries):
         try:
+            if gcs_client is None:
+                gcs_client = get_gcs_client()
+            
+            bucket = gcs_client.get_bucket(bucket_name)
+            blob = bucket.blob(blob_name)
             blob.download_to_filename(local_path)
             logging.info(f"Worker {worker_id}: Successfully downloaded {blob_name}")
+            return_gcs_client(gcs_client)
             return
         except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if gcs_client:
+                    try:
+                        return_gcs_client(gcs_client)
+                    except:
+                        pass
+                gcs_client = None
+                
             if attempt == max_retries - 1:
                 logging.warning(f"Worker {worker_id}: Failed to download {blob_name} from GCS after {max_retries} attempts - {e}")
+                if gcs_client:
+                    try:
+                        return_gcs_client(gcs_client)
+                    except:
+                        pass
             else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
                 logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {blob_name} - {e}")
-                time.sleep(2 ** attempt)
+                time.sleep(wait_time)
 
 def download_gcs_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 20)
+    get_gcs_client_pool(pool_size)
+    
     client = get_gcs_client()
     bucket = client.get_bucket(bucket_name)
+    return_gcs_client(client)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         worker_id = 0
@@ -287,28 +324,47 @@ def upload_to_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def upload_gcs_file(bucket_name, local_path, local_dir, worker_id, max_retries=3):
-    gcs_client = get_gcs_client()
-    bucket = gcs_client.get_bucket(bucket_name)
+def upload_gcs_file(bucket_name, local_path, local_dir, worker_id, max_retries=5):
+    gcs_client = None
     
-    # Normalize object key for GCS (always use forward slashes)
     object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
-
-    blob = bucket.blob(object_key)
     
     for attempt in range(max_retries):
         try:
+            if gcs_client is None:
+                gcs_client = get_gcs_client()
+            
+            bucket = gcs_client.get_bucket(bucket_name)
+            blob = bucket.blob(object_key)
             blob.upload_from_filename(local_path)
             logging.info(f"Worker {worker_id}: Uploaded {local_path} to GCS as {object_key}.")
+            return_gcs_client(gcs_client)
             return
         except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if gcs_client:
+                    try:
+                        return_gcs_client(gcs_client)
+                    except:
+                        pass
+                gcs_client = None
+                
             if attempt == max_retries - 1:
                 logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to GCS after {max_retries} attempts - {e}")
+                if gcs_client:
+                    try:
+                        return_gcs_client(gcs_client)
+                    except:
+                        pass
             else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
                 logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {local_path} - {e}")
-                time.sleep(2 ** attempt)
+                time.sleep(wait_time)
 
 def upload_to_gcs_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 20)
+    get_gcs_client_pool(pool_size)
+    
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = []
         worker_id = 0
