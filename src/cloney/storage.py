@@ -172,7 +172,7 @@ def download_gcs_file(bucket_name, blob_name, local_dir, worker_id, max_retries=
                 time.sleep(wait_time)
 
 def download_gcs_bucket(bucket_name, local_dir, max_workers=50):
-    pool_size = min(max_workers, 20)
+    pool_size = min(max_workers, 40)
     get_gcs_client_pool(pool_size)
     
     client = get_gcs_client()
@@ -362,7 +362,7 @@ def upload_gcs_file(bucket_name, local_path, local_dir, worker_id, max_retries=5
                 time.sleep(wait_time)
 
 def upload_to_gcs_bucket(bucket_name, local_dir, max_workers=50):
-    pool_size = min(max_workers, 20)
+    pool_size = min(max_workers, 40)
     get_gcs_client_pool(pool_size)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
