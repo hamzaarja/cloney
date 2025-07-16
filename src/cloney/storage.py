@@ -16,6 +16,7 @@ python_logging.getLogger('botocore.utils').setLevel(python_logging.WARNING)
 python_logging.getLogger('botocore.checksums').setLevel(python_logging.WARNING)
 
 _spaces_client = None
+_gcs_client = None
 
 def get_spaces_client():
     global _spaces_client
@@ -106,7 +107,17 @@ def download_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def download_gcs_file(gcs_client, bucket_name, blob_name, local_dir, worker_id, max_retries=3):
+def get_gcs_client():
+    global _gcs_client
+    
+    if _gcs_client is not None:
+        return _gcs_client
+    
+    _gcs_client = gcs_storage.Client()
+    return _gcs_client
+
+def download_gcs_file(bucket_name, blob_name, local_dir, worker_id, max_retries=3):
+    gcs_client = get_gcs_client()
     bucket = gcs_client.get_bucket(bucket_name)
     blob = bucket.blob(blob_name)
     
@@ -128,15 +139,14 @@ def download_gcs_file(gcs_client, bucket_name, blob_name, local_dir, worker_id, 
                 time.sleep(2 ** attempt)
 
 def download_gcs_bucket(bucket_name, local_dir, max_workers=50):
-    client = gcs_storage.Client()
+    client = get_gcs_client()
     bucket = client.get_bucket(bucket_name)
     
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         worker_id = 0
         futures = []
         for blob in bucket.list_blobs():
-            gcs_client = gcs_storage.Client()
-            futures.append(executor.submit(download_gcs_file, gcs_client, bucket_name, blob.name, local_dir, worker_id))
+            futures.append(executor.submit(download_gcs_file, bucket_name, blob.name, local_dir, worker_id))
             worker_id += 1
         concurrent.futures.wait(futures)
 
@@ -277,7 +287,8 @@ def upload_to_s3_bucket(bucket_name, local_dir, max_workers=50):
 
 # --- Google Cloud Storage Functions ---
 
-def upload_gcs_file(gcs_client, bucket_name, local_path, local_dir, worker_id, max_retries=3):
+def upload_gcs_file(bucket_name, local_path, local_dir, worker_id, max_retries=3):
+    gcs_client = get_gcs_client()
     bucket = gcs_client.get_bucket(bucket_name)
     
     # Normalize object key for GCS (always use forward slashes)
@@ -304,8 +315,7 @@ def upload_to_gcs_bucket(bucket_name, local_dir, max_workers=50):
         for root, _, files in os.walk(local_dir):
             for file in files:
                 local_path = os.path.join(root, file)
-                gcs_client = gcs_storage.Client()
-                futures.append(executor.submit(upload_gcs_file, gcs_client, bucket_name, local_path, local_dir, worker_id))
+                futures.append(executor.submit(upload_gcs_file, bucket_name, local_path, local_dir, worker_id))
                 worker_id += 1
         concurrent.futures.wait(futures)
 
