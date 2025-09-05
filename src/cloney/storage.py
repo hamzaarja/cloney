@@ -23,6 +23,8 @@ _gcs_client_pool = None
 _gcs_pool_lock = threading.Lock()
 _s3_client_pool = None
 _s3_pool_lock = threading.Lock()
+_r2_client_pool = None
+_r2_pool_lock = threading.Lock()
 
 def get_spaces_client():
     global _spaces_client
@@ -49,6 +51,41 @@ def get_spaces_client():
     )
     return _spaces_client
 
+def get_r2_client_pool(pool_size=10):
+    global _r2_client_pool, _r2_pool_lock
+    
+    if _r2_client_pool is not None:
+        return _r2_client_pool
+    
+    with _r2_pool_lock:
+        if _r2_client_pool is None:
+            _r2_client_pool = queue.Queue()
+            for _ in range(pool_size):
+                access_key = os.getenv("R2_ACCESS_KEY_ID")
+                secret_key = os.getenv("R2_SECRET_ACCESS_KEY")
+                account_id = os.getenv("R2_ACCOUNT_ID")
+
+                if not access_key or not secret_key or not account_id:
+                    raise ValueError("ERROR: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_ACCOUNT_ID must be set as environment variables.")
+
+                r2_client = boto3.client('s3',
+                    endpoint_url=f'https://{account_id}.r2.cloudflarestorage.com',
+                    aws_access_key_id=access_key,
+                    aws_secret_access_key=secret_key,
+                    region_name='auto'
+                )
+                _r2_client_pool.put(r2_client)
+    
+    return _r2_client_pool
+
+def get_r2_client():
+    pool = get_r2_client_pool()
+    return pool.get()
+
+def return_r2_client(client):
+    pool = get_r2_client_pool()
+    pool.put(client)
+
 @time_logger
 def download_from_source(source_service, source_bucket, local_dir):
     if source_service == "s3":
@@ -61,6 +98,8 @@ def download_from_source(source_service, source_bucket, local_dir):
         download_oss_bucket(source_bucket, local_dir)
     elif source_service == "azure":
         download_azure_bucket(source_bucket, local_dir)
+    elif source_service == "r2":
+        download_r2_bucket(source_bucket, local_dir)
     else:
         raise ValueError(f"Unsupported source service: {source_service}")
 
@@ -76,6 +115,8 @@ def upload_to_destination(destination_service, destination_bucket, local_dir):
         upload_to_oss_bucket(destination_bucket, local_dir)
     elif destination_service == "azure":
         upload_to_azure_bucket(destination_bucket, local_dir)
+    elif destination_service == "r2":
+        upload_to_r2_bucket(destination_bucket, local_dir)
     else:
         raise ValueError(f"Unsupported destination service: {destination_service}")
 
@@ -523,4 +564,109 @@ def upload_to_spaces_bucket(bucket_name, local_dir):
                 local_path = os.path.join(root, file)
                 worker_id = len(futures)
                 futures.append(executor.submit(upload_spaces_file, bucket_name, local_path, local_dir, worker_id))
+        concurrent.futures.wait(futures)
+
+# --- Cloudflare R2 Functions ---
+
+def download_r2_file(bucket_name, object_key, local_dir, worker_id, max_retries=5):
+    r2_client = None
+    
+    local_path = os.path.join(local_dir, object_key)
+    os.makedirs(os.path.dirname(local_path), exist_ok=True)
+    
+    for attempt in range(max_retries):
+        try:
+            if r2_client is None:
+                r2_client = get_r2_client()
+            
+            r2_client.download_file(bucket_name, object_key, local_path)
+            logging.info(f"Worker {worker_id}: downloaded {object_key} from R2.")
+            return_r2_client(r2_client)
+            return
+        except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if r2_client:
+                    try:
+                        return_r2_client(r2_client)
+                    except:
+                        pass
+                r2_client = None
+                
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to download {object_key} from R2 after {max_retries} attempts - {e}")
+                if r2_client:
+                    try:
+                        return_r2_client(r2_client)
+                    except:
+                        pass
+            else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {object_key} - {e}")
+                time.sleep(wait_time)
+
+def download_r2_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 40)
+    get_r2_client_pool(pool_size)
+    
+    r2 = get_r2_client()
+    paginator = r2.get_paginator("list_objects_v2")
+    return_r2_client(r2)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        worker_id = 0
+        futures = []
+        for page in paginator.paginate(Bucket=bucket_name):
+            for obj in page.get("Contents", []):
+                object_key = obj["Key"]
+                futures.append(executor.submit(download_r2_file, bucket_name, object_key, local_dir, worker_id))
+                worker_id += 1
+        concurrent.futures.wait(futures)
+
+def upload_r2_file(bucket_name, local_path, local_dir, worker_id, max_retries=5):
+    r2_client = None
+    
+    object_key = posixpath.join(*os.path.relpath(local_path, local_dir).split(os.sep))
+    
+    for attempt in range(max_retries):
+        try:
+            if r2_client is None:
+                r2_client = get_r2_client()
+            
+            r2_client.upload_file(local_path, bucket_name, object_key)
+            logging.info(f"Worker {worker_id}: Uploaded {local_path} to R2 as {object_key}.")
+            return_r2_client(r2_client)
+            return
+        except Exception as e:
+            if "pool" in str(e).lower() or "connection" in str(e).lower() or "timeout" in str(e).lower():
+                if r2_client:
+                    try:
+                        return_r2_client(r2_client)
+                    except:
+                        pass
+                r2_client = None
+                
+            if attempt == max_retries - 1:
+                logging.warning(f"Worker {worker_id}: Failed to upload {local_path} to R2 after {max_retries} attempts - {e}")
+                if r2_client:
+                    try:
+                        return_r2_client(r2_client)
+                    except:
+                        pass
+            else:
+                wait_time = (2 ** attempt) + random.uniform(0, 1)
+                logging.info(f"Worker {worker_id}: Retry {attempt + 1} for {local_path} - {e}")
+                time.sleep(wait_time)
+
+def upload_to_r2_bucket(bucket_name, local_dir, max_workers=50):
+    pool_size = min(max_workers, 40)
+    get_r2_client_pool(pool_size)
+    
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = []
+        worker_id = 0
+        for root, _, files in os.walk(local_dir):
+            for file in files:
+                local_path = os.path.join(root, file)
+                futures.append(executor.submit(upload_r2_file, bucket_name, local_path, local_dir, worker_id))
+                worker_id += 1
         concurrent.futures.wait(futures)

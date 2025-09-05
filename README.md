@@ -1,10 +1,10 @@
 # Cloney - Storage Migration CLI
 
-Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, Google Cloud Storage (GCS), Alibaba Cloud OSS, DigitalOcean Spaces, and Azure Blob Storage, allowing you to move data efficiently.
+Cloney is a lightweight command-line tool designed to migrate files between different cloud storage providers seamlessly. It supports AWS S3, Google Cloud Storage (GCS), Alibaba Cloud OSS, DigitalOcean Spaces, Azure Blob Storage, and Cloudflare R2, allowing you to move data efficiently.
 
 ## Features
 
-🔄 Migrate files between S3, GCS, OSS, Spaces and Azure Blob
+🔄 Migrate files between S3, GCS, OSS, Spaces, Azure Blob, and Cloudflare R2
 
 ⚡ Fast and efficient transfer with minimal configuration
 
@@ -52,6 +52,12 @@ cloney azure my-source-container azure my-destination-container
 cloney oss my-source-bucket oss my-destination-bucket
 ```
 
+**Cloudflare R2 to Cloudflare R2**
+
+```sh
+cloney r2 my-source-bucket r2 my-destination-bucket
+```
+
 
 ### Cross-Cloud Transfers
 
@@ -79,6 +85,18 @@ cloney azure my-azure-container oss my-oss-bucket
 
 ```sh
 cloney s3 my-source-bucket spaces my-destination-bucket
+```
+
+**AWS S3 to Cloudflare R2**
+
+```sh
+cloney s3 my-source-bucket r2 my-destination-bucket
+```
+
+**Cloudflare R2 to Google Cloud Storage**
+
+```sh
+cloney r2 my-r2-bucket gcs my-gcs-bucket
 ```
 
 
@@ -135,6 +153,14 @@ export SPACES_SECRET_KEY=your-secret-key
 export SPACES_REGION=your-region
 ```
 
+**Cloudflare R2**
+
+```sh
+export R2_ACCESS_KEY_ID=your-access-key-id
+export R2_SECRET_ACCESS_KEY=your-secret-access-key
+export R2_ACCOUNT_ID=your-account-id
+```
+
 ### Windows (PowerShell)
 
 **AWS S3**
@@ -170,6 +196,14 @@ $env:AZURE_STORAGE_CONNECTION_STRING="your-connection-string"
 $env:SPACES_ACCESS_KEY="your-access-key"
 $env:SPACES_SECRET_KEY="your-secret-key"
 $env:SPACES_REGION="your-region"
+```
+
+**Cloudflare R2**
+
+```sh
+$env:R2_ACCESS_KEY_ID="your-access-key-id"
+$env:R2_SECRET_ACCESS_KEY="your-secret-access-key"
+$env:R2_ACCOUNT_ID="your-account-id"
 ```
 
 ## Contributing

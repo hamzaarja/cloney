@@ -6,6 +6,21 @@ import os
 from cloney.logger import logging
 from cloney.storage import get_spaces_client
 
+def get_r2_client():
+    access_key = os.getenv("R2_ACCESS_KEY_ID")
+    secret_key = os.getenv("R2_SECRET_ACCESS_KEY")
+    account_id = os.getenv("R2_ACCOUNT_ID")
+
+    if not access_key or not secret_key or not account_id:
+        raise ValueError("ERROR: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_ACCOUNT_ID must be set as environment variables.")
+
+    return boto3.client('s3',
+        endpoint_url=f'https://{account_id}.r2.cloudflarestorage.com',
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name='auto'
+    )
+
 
 def check_source_bucket(source_service, source_bucket):
     if source_service == "s3":
@@ -65,8 +80,16 @@ def check_source_bucket(source_service, source_bucket):
         except Exception as e:
             logging.warning(f"An error occurred while checking the OSS bucket: {e}")
             return False
+    elif source_service == "r2":
+        try:
+            r2_client = get_r2_client()
+            r2_client.head_bucket(Bucket=source_bucket)
+            return True
+        except Exception as e:
+            logging.warning(f"R2 Bucket {source_bucket} not found: {e}")
+            return False
     else:
-        logging.warning(f"Unsupported source service: {source_service}, did you mean s3, gcs, azure or oss?")
+        logging.warning(f"Unsupported source service: {source_service}, did you mean s3, spaces, gcs, oss, azure, or r2?")
         return False
 
 
@@ -156,6 +179,19 @@ def check_destination_bucket(destination_service, destination_bucket, create_if_
         except Exception as e:
             logging.warning(f"An error occurred while checking the OSS bucket: {e}")
             return False
+    elif destination_service == "r2":
+        try:
+            r2_client = get_r2_client()
+            r2_client.head_bucket(Bucket=destination_bucket)
+            return True
+        except Exception:
+            if create_if_missing:
+                r2_client.create_bucket(Bucket=destination_bucket)
+                logging.info(f"Created R2 Bucket {destination_bucket}")
+                return True
+            else:
+                logging.warning(f"R2 Bucket {destination_bucket} not found, pass --create-destination-bucket to create destination bucket.")
+                return False
     else:
-        logging.warning(f"Unsupported source service: {destination_service}")
+        logging.warning(f"Unsupported destination service: {destination_service}")
         return False
