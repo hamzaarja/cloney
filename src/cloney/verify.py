@@ -7,6 +7,21 @@ from cloney.logger import logging
 from cloney.utils import time_logger
 from cloney.storage import get_spaces_client
 
+def get_r2_client():
+    access_key = os.getenv("R2_ACCESS_KEY_ID")
+    secret_key = os.getenv("R2_SECRET_ACCESS_KEY")
+    account_id = os.getenv("R2_ACCOUNT_ID")
+
+    if not access_key or not secret_key or not account_id:
+        raise ValueError("ERROR: R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and R2_ACCOUNT_ID must be set as environment variables.")
+
+    return boto3.client('s3',
+        endpoint_url=f'https://{account_id}.r2.cloudflarestorage.com',
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        region_name='auto'
+    )
+
 def get_s3_objects(bucket_name):
     s3 = boto3.client("s3")
     objects = []
@@ -106,6 +121,25 @@ def get_oss_objects(bucket_name):
         logging.warning(f"OSS Error: {e}")
         return []
 
+def get_r2_objects(bucket_name):
+    try:
+        r2 = get_r2_client()
+        objects = []
+
+        paginator = r2.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=bucket_name):
+            if "Contents" in page:
+                for obj in page["Contents"]:
+                    objects.append({
+                        "Key": obj["Key"],
+                        "Size": obj["Size"]
+                    })
+
+        return objects
+    except Exception as e:
+        logging.warning(f"R2 Error: {e}")
+        return []
+
 @time_logger
 def compare_object_lists(source_service, source_bucket, destination_service, destination_bucket):
     source_objects = []
@@ -120,6 +154,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
         source_objects = get_oss_objects(source_bucket)
     elif source_service == "azure":
         source_objects = get_azure_objects(source_bucket)
+    elif source_service == "r2":
+        source_objects = get_r2_objects(source_bucket)
     else:
         raise ValueError(f"Unsupported source service: {source_service}")
     
@@ -133,6 +169,8 @@ def compare_object_lists(source_service, source_bucket, destination_service, des
         destination_objects = get_oss_objects(destination_bucket)
     elif destination_service == "azure":
         destination_objects = get_azure_objects(destination_bucket)
+    elif destination_service == "r2":
+        destination_objects = get_r2_objects(destination_bucket)
     else:
         raise ValueError(f"Unsupported destination service: {destination_service}")
     if not source_objects:
